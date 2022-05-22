@@ -16,7 +16,8 @@ pub enum ContractError {
     #[error("Not enough funds")]
     Notenough{},
 
-    
+     #[error("You can not mint")]
+    CannotMint{},
  
     #[error("Escrow not expired")]
     NotExpired {},

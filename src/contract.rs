@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary,   CosmosMsg, Deps, DepsMut,Binary,Decimal,
+    entry_point, to_binary,   CosmosMsg, Deps, DepsMut,Binary,Decimal,
     Env, MessageInfo, BankMsg, Response, StdResult, Uint128, WasmMsg, Coin, 
 };
 
@@ -9,7 +9,7 @@ use crate::state::{
     State,CONFIG,UserInfo,MEMBERS
 };
 use cw721_base::{ExecuteMsg as Cw721BaseExecuteMsg, MintMsg};
-use cw721::{Cw721ReceiveMsg,Cw721ExecuteMsg};
+use cw721::{Cw721ExecuteMsg};
 
 #[entry_point]
 pub fn instantiate(
@@ -25,9 +25,11 @@ pub fn instantiate(
         denom: msg.denom,
         fee : msg.fee,
         royalty : msg.royalty,
-        total_nft : Uint128::new(0)
+        total_nft : Uint128::new(0),
+        check_mint : msg.check_mint,
+        can_mint : true
     };
-    CONFIG.save(deps.storage,&state);
+    CONFIG.save(deps.storage,&state)?;
     Ok(Response::default())
 }
 
@@ -43,6 +45,7 @@ pub fn execute(
         ExecuteMsg::SetAdminsList { members } => execute_set_members(deps,env,info,members),
         ExecuteMsg::SetRevealAddress { address } => execute_set_address(deps, info, address),
         ExecuteMsg::SetNftAddress { address } => execute_set_nft_address(deps, info, address),
+        ExecuteMsg::RunMintFunction{flag} =>  execute_run_mint(deps,info,flag)
     }
 }
 
@@ -51,7 +54,7 @@ fn execute_reveal_nft(
     _env: Env,
     info: MessageInfo,
     token_id: String,
-    reveal_id:String,
+    reveal_id:i32,
     mint_msg:HopeMintMsg
 ) -> Result<Response, ContractError> {
    
@@ -69,7 +72,19 @@ fn execute_reveal_nft(
         return Err(ContractError::Notenough {  });
     }
 
+    if state.can_mint ==false {
+        return Err(ContractError::CannotMint{})
+    }
+
+    CONFIG.update(deps.storage,
+        | mut state|->StdResult<_>{
+            state.total_nft = state.total_nft+Uint128::new(1);
+            state.check_mint[(reveal_id-1) as usize]=false;
+            Ok(state)
+    })?;
+
     let mut messages:Vec<CosmosMsg> = vec![];
+
     for user in members{
         if user.portion == Decimal::zero(){
             messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -91,13 +106,13 @@ fn execute_reveal_nft(
     }
     }
 
-   
+    
     Ok(Response::new()
         .add_messages(messages)
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
              contract_addr: state.reveal_address, 
              msg: to_binary(&Cw721BaseExecuteMsg::Mint(MintMsg{
-                token_id:reveal_id,
+                token_id:["Reveal".to_string(),reveal_id.to_string()].join("."),
                 owner:info.sender.to_string(),
                 token_uri : mint_msg.clone().image,
                 extension :mint_msg.clone()
@@ -120,6 +135,26 @@ fn execute_set_members(
         return Err(ContractError::Unauthorized {});
     }
     MEMBERS.save(deps.storage, &members)?;
+    Ok(Response::default())
+}
+
+
+fn execute_run_mint(
+    deps: DepsMut,
+    info: MessageInfo,
+    flag: bool,
+)->Result<Response,ContractError>{
+
+    let state = CONFIG.load(deps.storage)?;
+
+    if info.sender.to_string() != state.owner{
+        return Err(ContractError::Unauthorized {});
+    }
+    CONFIG.update(deps.storage,
+    |mut state|->StdResult<_>{
+        state.can_mint = flag;
+        Ok(state)
+    })?;
     Ok(Response::default())
 }
 
@@ -193,7 +228,8 @@ mod tests {
         let instantiate_msg = InstantiateMsg {
             denom : "ujuno".to_string(),
             fee:Uint128::new(3000000),
-            royalty : Decimal::from_ratio(5 as u128 , 100 as u128)
+            royalty : Decimal::from_ratio(5 as u128 , 100 as u128),
+            check_mint : vec![true,true,true,true,true]
         };
         let info = mock_info("creator", &[]);
         let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();
@@ -215,7 +251,9 @@ mod tests {
             denom : "ujuno".to_string(),
             fee : Uint128::new(3000000),
             royalty : Decimal::from_ratio(5 as u128,100 as u128),
-            total_nft:Uint128::new(0)
+            total_nft:Uint128::new(0),
+            check_mint:vec![true,true,true,true,true],
+            can_mint :  true
         });
 
         let info = mock_info("creator", &[]);
@@ -249,11 +287,29 @@ mod tests {
             compiler : Some("compiler".to_string())
         
         };
+
         let info = mock_info("creator", &[Coin{
             denom:"ujuno".to_string(),
             amount:Uint128::new(3000000)
         }]);
-        let msg = ExecuteMsg::RevealNft { token_id: "hope.1".to_string(),reveal_id:"reveal.1".to_string(), mint_msg:mint_msg.clone() };
+        
+        let msg = ExecuteMsg::RunMintFunction { flag:false};
+         execute(deps.as_mut(),mock_env(),info,msg).unwrap();
+
+         let info = mock_info("creator", &[Coin{
+            denom:"ujuno".to_string(),
+            amount:Uint128::new(3000000)
+        }]);
+
+        let msg = ExecuteMsg::RunMintFunction { flag:true};
+         execute(deps.as_mut(),mock_env(),info,msg).unwrap();
+
+
+        let info = mock_info("creator", &[Coin{
+            denom:"ujuno".to_string(),
+            amount:Uint128::new(3000000)
+        }]);
+        let msg = ExecuteMsg::RevealNft { token_id: "hope.1".to_string(),reveal_id:5, mint_msg:mint_msg.clone() };
         let res = execute(deps.as_mut(),mock_env(),info,msg).unwrap();
         assert_eq!(res.messages.len(),4);
         assert_eq!(res.messages[0].msg,CosmosMsg::Wasm(WasmMsg::Execute {
@@ -280,11 +336,14 @@ mod tests {
         assert_eq!(res.messages[3].msg,CosmosMsg::Wasm(WasmMsg::Execute {
              contract_addr: state.reveal_address, 
              msg: to_binary(&Cw721BaseExecuteMsg::Mint(MintMsg{
-                token_id:"reveal.1".to_string(),
+                token_id:"Reveal.5".to_string(),
                 owner:"creator".to_string(),
                 token_uri : Some("image".to_string()),
                 extension : mint_msg
              })).unwrap() , 
-             funds: vec![] }))
+             funds: vec![] }));
+        let state = query_state_info(deps.as_ref()).unwrap();
+        assert_eq!(state.total_nft,Uint128::new(1));
+         assert_eq!(state.check_mint,vec![true,true,true,true,false]);
     }
 }

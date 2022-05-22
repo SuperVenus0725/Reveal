@@ -1,6 +1,4 @@
 use cosmwasm_std::{ Uint128, Decimal};
-use cw20::Cw20ReceiveMsg;
-use cw721::Cw721ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use crate::state::UserInfo;
@@ -9,16 +7,18 @@ use crate::state::UserInfo;
 pub struct InstantiateMsg {
     pub denom:String,
     pub fee : Uint128,
-    pub royalty : Decimal
+    pub royalty : Decimal,
+    pub check_mint : Vec<bool>
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    RevealNft{token_id:String,reveal_id:String,mint_msg:HopeMintMsg},
+    RevealNft{token_id:String,reveal_id:i32,mint_msg:HopeMintMsg},
     SetRevealAddress { address: String },
     SetNftAddress { address: String },
     SetAdminsList{members:Vec<UserInfo>},
+    RunMintFunction{flag:bool}
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

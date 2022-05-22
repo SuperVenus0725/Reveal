@@ -1,8 +1,6 @@
-use cosmwasm_std::{Addr, Order, StdResult, Storage, Uint128,Decimal};
-use cosmwasm_storage::{
-    bucket, bucket_read, singleton, singleton_read, ReadonlySingleton, Singleton,
-};
-use cw_storage_plus::{Map,Item};
+use cosmwasm_std::{ Uint128,Decimal};
+
+use cw_storage_plus::{Item};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +16,9 @@ pub struct State {
     pub denom : String,
     pub fee : Uint128,
     pub royalty : Decimal,
-    pub total_nft:Uint128
+    pub total_nft:Uint128,
+    pub check_mint : Vec<bool>,
+    pub can_mint: bool
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
